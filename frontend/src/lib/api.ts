@@ -11,11 +11,10 @@ export type ApiError = {
   errors?: Array<{ field?: string; message?: string }>;
 };
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, "") || "http://localhost:5000";
+const API_BASE_URL = "https://ironpulse-ai.onrender.com";
 
 export const getAccessToken = () =>
   (typeof window !== "undefined" && localStorage.getItem("ironpulse:accessToken")) ||
-  (import.meta.env.VITE_API_TOKEN as string | undefined) ||
   "";
 
 export const hasBackendAuth = () => Boolean(getAccessToken());
