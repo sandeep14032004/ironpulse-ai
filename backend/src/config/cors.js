@@ -1,10 +1,18 @@
 const cors = require("cors");
 
-const allowedOrigins = [process.env.FRONTEND_DEV_URL, process.env.FRONTEND_URL].filter(Boolean);
+const parseOrigins = (...values) =>
+  values
+    .flatMap((value) => (value || "").split(","))
+    .map((origin) => origin.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+
+const allowedOrigins = [...new Set(parseOrigins(process.env.FRONTEND_DEV_URL, process.env.FRONTEND_URL))];
 
 const corsOptions = {
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    const normalizedOrigin = origin?.replace(/\/+$/, "");
+
+    if (!normalizedOrigin || allowedOrigins.includes(normalizedOrigin)) {
       return callback(null, true);
     }
     return callback(new Error("CORS policy blocked this origin"));
