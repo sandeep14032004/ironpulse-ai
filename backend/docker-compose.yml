@@ -1,0 +1,9 @@
+version: "3.9"
+services:
+  ironpulse-backend:
+    build: .
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    restart: unless-stopped
