@@ -25,21 +25,28 @@ app.use(
     max: 500,
     standardHeaders: true,
     legacyHeaders: false,
-  })
+  }),
 );
 
 app.get("/health", (req, res) => {
-  res.json(buildSuccess({ message: "Service healthy", data: { uptime: process.uptime() } }));
+  res.json(
+    buildSuccess({
+      message: "Service healthy",
+      data: { uptime: process.uptime() },
+    }),
+  );
 });
 app.get("/", (req, res) => {
-  res.json(buildSuccess({
-    message: "IronPulse AI API is running",
-    data: {
-      health: "/health",
-      docs: "/api/docs",
-      apiBase: "/api/v1",
-    },
-  }));
+  res.json(
+    buildSuccess({
+      message: "IronPulse AI API is running",
+      data: {
+        health: "/health",
+        docs: "/api/docs",
+        apiBase: "/api/v1",
+      },
+    }),
+  );
 });
 app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use("/api/v1", routes);
