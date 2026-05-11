@@ -5,7 +5,7 @@ const exerciseTrackingSchema = new mongoose.Schema(
     exerciseName: { type: String, required: true },
     totalSets: { type: Number, required: true },
     completedSetIndexes: [{ type: Number }],
-    reps: { type: Number, required: true },
+    reps: { type: String, required: true },
     weight: { type: Number, default: 0 },
     completed: { type: Boolean, default: false },
     muscleGroup: String,

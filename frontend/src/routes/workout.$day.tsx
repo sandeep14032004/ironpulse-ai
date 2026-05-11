@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, Check, Flame, Timer, Trophy, ChevronDown, ChevronUp } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -18,7 +18,7 @@ export const Route = createFileRoute("/workout/$day")({
   },
   head: ({ params }) => {
     const d = WORKOUT_PLAN[Number(params.day) - 1];
-    return { meta: [{ title: `${d?.title ?? "Workout"} — IronPulse AI` }] };
+    return { meta: [{ title: `${d?.title ?? "Workout"} - IronPulse AI` }] };
   },
   component: WorkoutPage,
 });
@@ -33,8 +33,9 @@ function WorkoutPage() {
   const week = getProgressionWeek(state.startDate);
 
   const baseDay = WORKOUT_PLAN[dayNum - 1];
-  const exercises = useMemo(() => baseDay.exercises.map((e) => applyProgression(e, week)), [baseDay, week]);
+  if (!baseDay) return null;
 
+  const exercises = useMemo(() => baseDay.exercises.map((e) => applyProgression(e, week)), [baseDay, week]);
   const totalSets = exercises.reduce((a, e) => a + e.sets, 0);
   const [completed, setCompleted] = useLocalStorage<Record<string, boolean>>(
     `ironpulse:progress:${dayNum}:${new Date().toISOString().slice(0, 10)}`,
@@ -55,15 +56,20 @@ function WorkoutPage() {
     return () => clearInterval(id);
   }, []);
 
-  if (!baseDay) return null;
-
   if (baseDay.exercises.length === 0) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 text-center">
-        <div className="text-6xl mb-4">🌙</div>
+      <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 text-center">
+        <div className="mb-4 text-6xl">Rest</div>
         <h1 className="text-2xl font-bold">Rest Day</h1>
-        <p className="text-sm text-muted-foreground mt-2 max-w-xs">Recovery is when growth happens. Hydrate, sleep, and stretch lightly.</p>
-        <Link to="/" className="mt-6 px-5 py-2.5 rounded-full bg-primary text-primary-foreground font-semibold shadow-glow">Back home</Link>
+        <p className="mt-2 max-w-xs text-sm text-muted-foreground">
+          Recovery is when growth happens. Hydrate, sleep, and stretch lightly.
+        </p>
+        <Link
+          to="/"
+          className="mt-6 rounded-full bg-primary px-5 py-2.5 font-semibold text-primary-foreground shadow-glow"
+        >
+          Back home
+        </Link>
       </div>
     );
   }
@@ -73,7 +79,6 @@ function WorkoutPage() {
   const elapsedSec = Math.floor((now - startedAt) / 1000);
   const calories = Math.round(baseDay.estCalories * progress);
   const xpEarned = Math.round(progress * 100 + setsDone * 5);
-
   const allDone = setsDone === totalSets;
 
   const startMutation = useMutation({
@@ -91,7 +96,12 @@ function WorkoutPage() {
       if (!backendSessionId) return null;
       return apiRequest("/api/v1/workouts/complete-set", {
         method: "POST",
-        body: JSON.stringify({ sessionId: backendSessionId, exerciseName: payload.exerciseName, setIndex: payload.setIndex, weight: 0 }),
+        body: JSON.stringify({
+          sessionId: backendSessionId,
+          exerciseName: payload.exerciseName,
+          setIndex: payload.setIndex,
+          weight: 0,
+        }),
       });
     },
     onError: () => setSyncError("Set sync failed. Workout continues locally."),
@@ -133,8 +143,11 @@ function WorkoutPage() {
       xp: xpEarned,
       completed: allDone,
     };
-    addSession(session);
-    if (backendEnabled) finishMutation.mutate();
+    if (backendEnabled && backendSessionId) {
+      finishMutation.mutate();
+    } else {
+      addSession(session);
+    }
     setSaved(true);
     setTimeout(() => navigate({ to: "/" }), 800);
   };
@@ -159,10 +172,12 @@ function WorkoutPage() {
 
   return (
     <div className={`min-h-screen bg-background ${settings.liveGymMode ? "text-lg" : ""}`}>
-      <div className="mx-auto max-w-xl px-5 pt-5 pb-40">
-        {/* Top bar */}
+      <div className="mx-auto max-w-xl px-5 pb-40 pt-5">
         <div className="flex items-center justify-between">
-          <Link to="/" className="h-10 w-10 rounded-full bg-card border border-border flex items-center justify-center active:scale-95">
+          <Link
+            to="/"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card active:scale-95"
+          >
             <ArrowLeft className="h-5 w-5" />
           </Link>
           <div className="text-center">
@@ -171,7 +186,7 @@ function WorkoutPage() {
           </div>
           <button
             onClick={() => setShowTimer(true)}
-            className="h-10 w-10 rounded-full bg-card border border-border flex items-center justify-center active:scale-95"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card active:scale-95"
             aria-label="Rest timer"
           >
             <Timer className="h-5 w-5" />
@@ -179,8 +194,7 @@ function WorkoutPage() {
         </div>
         <SyncBanner online={backendEnabled && !!backendSessionId} message={syncError || undefined} />
 
-        {/* Progress hero */}
-        <div className="mt-5 rounded-3xl bg-card border border-border p-5 shadow-soft flex items-center gap-5">
+        <div className="mt-5 flex items-center gap-5 rounded-3xl border border-border bg-card p-5 shadow-soft">
           <ProgressRing progress={progress} size={104} stroke={10}>
             <div className="text-center">
               <div className="text-2xl font-bold tabular-nums">{Math.round(progress * 100)}%</div>
@@ -194,43 +208,49 @@ function WorkoutPage() {
           </div>
         </div>
 
-        {/* Muscles */}
         <div className="mt-3 flex flex-wrap gap-2">
           {baseDay.muscles.map((m) => (
-            <span key={m} className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-accent text-accent-foreground">{m}</span>
+            <span key={m} className="rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-foreground">
+              {m}
+            </span>
           ))}
         </div>
 
-        {/* Exercise list */}
         <div className="mt-5 space-y-3">
           {exercises.map((ex, i) => {
             const isOpen = expanded === i;
             const sets = Array.from({ length: ex.sets }, (_, k) => k);
             const exDone = sets.every((k) => completed[`${i}-${k}`]);
             const exCount = sets.filter((k) => completed[`${i}-${k}`]).length;
+
             return (
               <motion.div
                 key={i}
                 layout
-                className={`rounded-2xl border overflow-hidden transition ${
-                  exDone ? "bg-success/10 border-success/30" : "bg-card border-border"
+                className={`overflow-hidden rounded-2xl border transition ${
+                  exDone ? "border-success/30 bg-success/10" : "border-border bg-card"
                 }`}
               >
-                <button onClick={() => setExpanded(isOpen ? null : i)} className="w-full flex items-center gap-3 p-4 text-left">
+                <button onClick={() => setExpanded(isOpen ? null : i)} className="flex w-full items-center gap-3 p-4 text-left">
                   <div
-                    className={`h-10 w-10 rounded-xl flex items-center justify-center font-bold tabular-nums ${
+                    className={`flex h-10 w-10 items-center justify-center rounded-xl font-bold tabular-nums ${
                       exDone ? "bg-success text-success-foreground" : "bg-secondary text-secondary-foreground"
                     }`}
                   >
                     {exDone ? <Check className="h-5 w-5" /> : i + 1}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold truncate">{ex.name}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold">{ex.name}</p>
+                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{ex.description}</p>
                     <p className="text-xs text-muted-foreground tabular-nums">
-                      {ex.sets} × {ex.reps} · {exCount}/{ex.sets} done
+                      {ex.sets} x {ex.reps} · {exCount}/{ex.sets} done
                     </p>
                   </div>
-                  {isOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                  {isOpen ? (
+                    <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  )}
                 </button>
                 <AnimatePresence initial={false}>
                   {isOpen && (
@@ -241,6 +261,9 @@ function WorkoutPage() {
                       transition={{ duration: 0.25, ease: "easeOut" }}
                       className="px-4 pb-4"
                     >
+                      <div className="mb-3 rounded-2xl border border-border/70 bg-background/70 p-3 text-sm text-muted-foreground">
+                        {ex.description}
+                      </div>
                       <div className="grid grid-cols-2 gap-2">
                         {sets.map((k) => {
                           const key = `${i}-${k}`;
@@ -250,10 +273,10 @@ function WorkoutPage() {
                               key={key}
                               onClick={() => toggleSet(key)}
                               disabled={completeSetMutation.isPending}
-                              className={`h-14 rounded-xl border font-semibold text-sm transition active:scale-[0.97] flex items-center justify-center gap-2 ${
+                              className={`flex h-14 items-center justify-center gap-2 rounded-xl border text-sm font-semibold transition active:scale-[0.97] ${
                                 done
-                                  ? "bg-success text-success-foreground border-success shadow-soft"
-                                  : "bg-background border-border text-foreground hover:border-primary/40"
+                                  ? "border-success bg-success text-success-foreground shadow-soft"
+                                  : "border-border bg-background text-foreground hover:border-primary/40"
                               }`}
                             >
                               {done && <Check className="h-4 w-4" />}
@@ -271,10 +294,9 @@ function WorkoutPage() {
           })}
         </div>
 
-        {/* Finish button */}
         <button
           onClick={finish}
-          className={`mt-6 w-full h-14 rounded-2xl font-semibold text-base shadow-glow active:scale-[0.99] transition ${
+          className={`mt-6 h-14 w-full rounded-2xl text-base font-semibold shadow-glow transition active:scale-[0.99] ${
             allDone ? "bg-success text-success-foreground" : "gradient-primary text-white"
           }`}
         >
@@ -282,8 +304,7 @@ function WorkoutPage() {
         </button>
       </div>
 
-      {/* Floating progress ring */}
-      <div className="fixed top-3 right-3 z-30 lg:hidden pointer-events-none">
+      <div className="pointer-events-none fixed right-3 top-3 z-30 lg:hidden">
         <div className="glass rounded-full p-1.5">
           <ProgressRing progress={progress} size={48} stroke={5}>
             <span className="text-[10px] font-bold tabular-nums">{Math.round(progress * 100)}</span>
@@ -296,10 +317,13 @@ function WorkoutPage() {
   );
 }
 
-function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function Stat({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">{icon}{label}</span>
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        {icon}
+        {label}
+      </span>
       <span className="text-sm font-semibold tabular-nums">{value}</span>
     </div>
   );

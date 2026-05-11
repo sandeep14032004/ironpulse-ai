@@ -26,7 +26,7 @@ type RemoteWorkoutExercise = {
   exerciseName: string;
   totalSets: number;
   completedSetIndexes?: number[];
-  reps?: number;
+  reps?: string;
   weight?: number;
   completed?: boolean;
   muscleGroup?: string;
@@ -64,7 +64,7 @@ type HistorySession = {
     exerciseName: string;
     totalSets: number;
     completedSets: number;
-    reps?: number;
+    reps?: string;
     weight?: number;
     muscleGroup?: string;
   }>;

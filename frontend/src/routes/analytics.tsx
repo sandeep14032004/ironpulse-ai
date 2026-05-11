@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { SyncBanner } from "@/components/SyncBanner";
@@ -8,33 +8,62 @@ import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, Res
 import { Flame, Timer, Trophy, TrendingUp } from "lucide-react";
 import { WORKOUT_PLAN } from "@/lib/workoutPlan";
 import { apiRequest, hasBackendAuth } from "@/lib/api";
+import { useAuthProfile } from "@/lib/auth";
 
 export const Route = createFileRoute("/analytics")({
-  head: () => ({ meta: [{ title: "Analytics — IronPulse AI" }] }),
+  head: () => ({ meta: [{ title: "Analytics - IronPulse AI" }] }),
   component: Analytics,
 });
 
 const TABS = ["Daily", "Weekly", "Monthly"] as const;
 
+type DailyRemote = {
+  completedWorkouts: number;
+  setsCompleted: number;
+  caloriesBurned: number;
+  duration: number;
+  completionScore: number;
+};
+
+type WeeklyRemote = {
+  totalWorkouts: number;
+  streak: number;
+  trainingVolume: number;
+  strongestDay: string | null;
+  muscleGroupFrequency: Record<string, number>;
+  trainingIntensityScore: number;
+  workoutAdherence: number;
+};
+
+type MonthlyRemote = {
+  consistencyHeatmap: Array<{ date: string; value: number }>;
+  muscleDistribution: Record<string, number>;
+  streakHeatmap: Array<{ date: string; value: number }>;
+  volumeProgression: Array<{ date: string; completedSets: number }>;
+  progressionTrends: Array<{ date: string; completion: number }>;
+  totalGymDays: number;
+};
+
 function Analytics() {
   const { state } = useAppState();
+  const profileQuery = useAuthProfile(hasBackendAuth());
   const [tab, setTab] = useState<typeof TABS[number]>("Weekly");
   const backendEnabled = hasBackendAuth();
 
   const dailyQuery = useQuery({
     queryKey: ["analytics-daily"],
     enabled: backendEnabled && tab === "Daily",
-    queryFn: () => apiRequest<Record<string, number>>("/api/v1/analytics/daily"),
+    queryFn: () => apiRequest<DailyRemote>("/api/v1/analytics/daily"),
   });
   const weeklyQuery = useQuery({
     queryKey: ["analytics-weekly"],
     enabled: backendEnabled && tab === "Weekly",
-    queryFn: () => apiRequest<Record<string, unknown>>("/api/v1/analytics/weekly"),
+    queryFn: () => apiRequest<WeeklyRemote>("/api/v1/analytics/weekly"),
   });
   const monthlyQuery = useQuery({
     queryKey: ["analytics-monthly"],
     enabled: backendEnabled && tab === "Monthly",
-    queryFn: () => apiRequest<Record<string, unknown>>("/api/v1/analytics/monthly"),
+    queryFn: () => apiRequest<MonthlyRemote>("/api/v1/analytics/monthly"),
   });
 
   const last7 = useMemo(() => {
@@ -66,7 +95,7 @@ function Analytics() {
     return out;
   }, [state.sessions]);
 
-  const muscleDist = useMemo(() => {
+  const muscleDistLocal = useMemo(() => {
     const map: Record<string, number> = {};
     for (const s of state.sessions) {
       const day = WORKOUT_PLAN[s.day - 1];
@@ -78,41 +107,64 @@ function Analytics() {
   const totalSets = state.sessions.reduce((a, s) => a + s.setsCompleted, 0);
   const totalCal = state.sessions.reduce((a, s) => a + s.calories, 0);
   const totalMin = Math.round(state.sessions.reduce((a, s) => a + s.durationSec, 0) / 60);
-  const streak = computeStreak(state.sessions);
-  const consistency = Math.min(100, Math.round((last7.filter((d) => d.sets > 0).length / 6) * 100));
-
+  const totalGymDaysLocal = new Set(state.sessions.map((s) => s.date.slice(0, 10))).size;
+  const streakLocal = computeStreak(state.sessions);
+  const consistencyLocal = Math.min(100, Math.round((last7.filter((d) => d.sets > 0).length / 6) * 100));
   const todaySession = state.sessions.find((s) => s.date.slice(0, 10) === new Date().toISOString().slice(0, 10));
-  const strongestDay = useMemo(() => {
+
+  const strongestDayLocal = useMemo(() => {
     const map: Record<string, number> = {};
     for (const s of state.sessions) map[s.title] = (map[s.title] || 0) + s.setsCompleted;
     const top = Object.entries(map).sort((a, b) => b[1] - a[1])[0];
     return top?.[0] ?? "—";
   }, [state.sessions]);
 
+  const monthlyRemote = monthlyQuery.data?.data;
+  const weeklyRemote = weeklyQuery.data?.data;
+  const dailyRemote = dailyQuery.data?.data;
+
+  const muscleDistRemote = monthlyRemote
+    ? Object.entries(monthlyRemote.muscleDistribution || {}).map(([name, value]) => ({ name, value }))
+    : [];
+  const muscleDist = muscleDistRemote.length > 0 ? muscleDistRemote : muscleDistLocal;
+
+  const volumeProgression =
+    monthlyRemote?.volumeProgression.map((item) => ({
+      label: new Date(item.date).toLocaleDateString("en", { month: "short", day: "numeric" }),
+      sets: item.completedSets,
+    })) ?? last7;
+
   const chartColors = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
+  const signedInLabel = profileQuery.data?.name ? `${profileQuery.data.name}'s analytics` : "Analytics";
 
   return (
     <AppShell>
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-muted-foreground">Insights</p>
-          <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{signedInLabel}</h1>
         </div>
       </div>
       <SyncBanner
         online={backendEnabled}
-        message={(dailyQuery.isError || weeklyQuery.isError || monthlyQuery.isError) ? "Showing local analytics due to sync issue" : undefined}
+        message={
+          backendEnabled
+            ? dailyQuery.isError || weeklyQuery.isError || monthlyQuery.isError
+              ? "Showing local analytics due to sync issue"
+              : undefined
+            : "Login to store and retrieve analytics per user from MongoDB."
+        }
       />
       {(dailyQuery.isPending || weeklyQuery.isPending || monthlyQuery.isPending) && backendEnabled && (
         <p className="mt-2 text-xs text-muted-foreground">Refreshing analytics...</p>
       )}
 
-      <div className="mt-5 inline-flex p-1 rounded-full bg-secondary w-full">
+      <div className="mt-5 inline-flex w-full rounded-full bg-secondary p-1">
         {TABS.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`flex-1 h-9 text-sm font-semibold rounded-full transition ${
+            className={`h-9 flex-1 rounded-full text-sm font-semibold transition ${
               tab === t ? "bg-card text-foreground shadow-soft" : "text-muted-foreground"
             }`}
           >
@@ -124,14 +176,19 @@ function Analytics() {
       {tab === "Daily" && (
         <div className="mt-5 space-y-4">
           <div className="grid grid-cols-2 gap-3">
-            <Tile icon={<Trophy className="h-4 w-4" />} label="Sets today" value={String(todaySession?.setsCompleted ?? 0)} />
-            <Tile icon={<Flame className="h-4 w-4" />} label="Calories" value={String(todaySession?.calories ?? 0)} />
-            <Tile icon={<Timer className="h-4 w-4" />} label="Duration" value={`${Math.round((todaySession?.durationSec ?? 0) / 60)}m`} />
-            <Tile icon={<TrendingUp className="h-4 w-4" />} label="Consistency" value={`${consistency}%`} />
+            <Tile icon={<Trophy className="h-4 w-4" />} label="Sets today" value={String(dailyRemote?.setsCompleted ?? todaySession?.setsCompleted ?? 0)} />
+            <Tile icon={<Flame className="h-4 w-4" />} label="Calories" value={String(dailyRemote?.caloriesBurned ?? todaySession?.calories ?? 0)} />
+            <Tile icon={<Timer className="h-4 w-4" />} label="Duration" value={`${dailyRemote?.duration ?? Math.round((todaySession?.durationSec ?? 0) / 60)}m`} />
+            <Tile icon={<TrendingUp className="h-4 w-4" />} label="Completion" value={`${Math.round(dailyRemote?.completionScore ?? 0)}%`} />
           </div>
           <Card title="Today completion">
-            <div className="h-2 bg-secondary rounded-full overflow-hidden">
-              <div className="h-full gradient-primary" style={{ width: `${todaySession ? (todaySession.setsCompleted / Math.max(1, todaySession.totalSets)) * 100 : 0}%` }} />
+            <div className="overflow-hidden rounded-full bg-secondary">
+              <div
+                className="h-2 gradient-primary"
+                style={{
+                  width: `${dailyRemote?.completionScore ?? (todaySession ? (todaySession.setsCompleted / Math.max(1, todaySession.totalSets)) * 100 : 0)}%`,
+                }}
+              />
             </div>
           </Card>
         </div>
@@ -140,20 +197,20 @@ function Analytics() {
       {tab === "Weekly" && (
         <div className="mt-5 space-y-4">
           <div className="grid grid-cols-3 gap-3">
-            <Tile icon={<Flame className="h-4 w-4" />} label="Streak" value={`${streak}d`} />
-            <Tile icon={<TrendingUp className="h-4 w-4" />} label="Volume" value={String(last7.reduce((a, d) => a + d.sets, 0))} />
-            <Tile icon={<Trophy className="h-4 w-4" />} label="Top day" value={strongestDay.split(" ")[0]} />
+            <Tile icon={<Flame className="h-4 w-4" />} label="Streak" value={`${weeklyRemote?.streak ?? profileQuery.data?.streak ?? streakLocal}d`} />
+            <Tile icon={<TrendingUp className="h-4 w-4" />} label="Volume" value={String(weeklyRemote?.trainingVolume ?? last7.reduce((a, d) => a + d.sets, 0))} />
+            <Tile icon={<Trophy className="h-4 w-4" />} label="Top day" value={(weeklyRemote?.strongestDay ?? strongestDayLocal).split(" ")[0]} />
           </div>
-          <Card title="Training volume — last 7 days">
+          <Card title="Training volume - recent block">
             <div className="h-44">
               <ResponsiveContainer>
-                <BarChart data={last7} margin={{ top: 10, right: 4, left: -16, bottom: 0 }}>
+                <BarChart data={volumeProgression.slice(-7)} margin={{ top: 10, right: 4, left: -16, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" stroke="var(--border)" vertical={false} />
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
                   <Tooltip cursor={{ fill: "var(--muted)" }} contentStyle={tooltipStyle} />
                   <Bar dataKey="sets" radius={[8, 8, 0, 0]}>
-                    {last7.map((_, i) => (
+                    {volumeProgression.slice(-7).map((_, i) => (
                       <Cell key={i} fill="var(--chart-1)" />
                     ))}
                   </Bar>
@@ -161,18 +218,12 @@ function Analytics() {
               </ResponsiveContainer>
             </div>
           </Card>
-          <Card title="Calories trend">
-            <div className="h-40">
-              <ResponsiveContainer>
-                <LineChart data={last7} margin={{ top: 10, right: 4, left: -16, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="2 4" stroke="var(--border)" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Line type="monotone" dataKey="cal" stroke="var(--chart-2)" strokeWidth={3} dot={{ r: 3 }} />
-                </LineChart>
-              </ResponsiveContainer>
+          <Card title="Weekly adherence">
+            <div className="flex items-baseline gap-2">
+              <span className="text-4xl font-bold tabular-nums">{weeklyRemote?.workoutAdherence ?? consistencyLocal}</span>
+              <span className="text-sm text-muted-foreground">/ 100</span>
             </div>
+            <p className="mt-1 text-xs text-muted-foreground">Based on how consistently workouts were completed.</p>
           </Card>
         </div>
       )}
@@ -180,22 +231,30 @@ function Analytics() {
       {tab === "Monthly" && (
         <div className="mt-5 space-y-4">
           <div className="grid grid-cols-3 gap-3">
-            <Tile icon={<Trophy className="h-4 w-4" />} label="Sets" value={String(totalSets)} />
+            <Tile icon={<Trophy className="h-4 w-4" />} label="Sets" value={String(monthlyRemote ? volumeProgression.reduce((sum, item) => sum + item.sets, 0) : totalSets)} />
             <Tile icon={<Flame className="h-4 w-4" />} label="Calories" value={String(totalCal)} />
-            <Tile icon={<Timer className="h-4 w-4" />} label="Minutes" value={String(totalMin)} />
+            <Tile icon={<Timer className="h-4 w-4" />} label="Gym days" value={String(monthlyRemote?.totalGymDays ?? totalGymDaysLocal)} />
           </div>
           <Card title="30-day heatmap">
             <div className="grid grid-cols-10 gap-1.5">
-              {last30.map((d) => {
-                const intensity = Math.min(1, d.value / 25);
+              {(monthlyRemote?.consistencyHeatmap?.length
+                ? monthlyRemote.consistencyHeatmap.map((item) => ({
+                    key: item.date,
+                    value: item.value,
+                  }))
+                : last30
+              ).map((d) => {
+                const value = "value" in d ? d.value : 0;
+                const key = "key" in d ? d.key : d.date;
+                const intensity = Math.min(1, value / 25);
                 return (
                   <div
-                    key={d.key}
-                    title={`${d.key}: ${d.value} sets`}
+                    key={key}
+                    title={`${key}: ${value} sets`}
                     className="aspect-square rounded-md"
                     style={{
                       background:
-                        d.value === 0
+                        value === 0
                           ? "var(--muted)"
                           : `color-mix(in oklab, var(--primary) ${20 + intensity * 80}%, transparent)`,
                     }}
@@ -223,19 +282,12 @@ function Analytics() {
             )}
             <div className="mt-2 flex flex-wrap gap-1.5">
               {muscleDist.map((m, i) => (
-                <span key={m.name} className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full bg-secondary">
+                <span key={m.name} className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2 py-1 text-xs">
                   <span className="h-2 w-2 rounded-full" style={{ background: chartColors[i % chartColors.length] }} />
                   {m.name}
                 </span>
               ))}
             </div>
-          </Card>
-          <Card title="Consistency score">
-            <div className="flex items-baseline gap-2">
-              <span className="text-4xl font-bold tabular-nums">{consistency}</span>
-              <span className="text-sm text-muted-foreground">/ 100</span>
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">Based on weekly attendance</p>
           </Card>
         </div>
       )}
@@ -243,7 +295,7 @@ function Analytics() {
   );
 }
 
-const tooltipStyle: React.CSSProperties = {
+const tooltipStyle: CSSProperties = {
   background: "var(--popover)",
   border: "1px solid var(--border)",
   borderRadius: 12,
@@ -251,20 +303,20 @@ const tooltipStyle: React.CSSProperties = {
   color: "var(--popover-foreground)",
 };
 
-function Tile({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function Tile({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
-    <div className="rounded-2xl bg-card border border-border p-3 shadow-soft">
-      <div className="h-8 w-8 rounded-xl bg-accent text-accent-foreground flex items-center justify-center">{icon}</div>
-      <p className="mt-2 text-lg font-bold tabular-nums leading-none">{value}</p>
-      <p className="text-[11px] uppercase tracking-wider text-muted-foreground mt-1">{label}</p>
+    <div className="rounded-2xl border border-border bg-card p-3 shadow-soft">
+      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-accent text-accent-foreground">{icon}</div>
+      <p className="mt-2 text-lg font-bold leading-none tabular-nums">{value}</p>
+      <p className="mt-1 text-[11px] uppercase tracking-wider text-muted-foreground">{label}</p>
     </div>
   );
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function Card({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="rounded-2xl bg-card border border-border p-4 shadow-soft">
-      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-3">{title}</p>
+    <div className="rounded-2xl border border-border bg-card p-4 shadow-soft">
+      <p className="mb-3 text-xs uppercase tracking-widest text-muted-foreground">{title}</p>
       {children}
     </div>
   );

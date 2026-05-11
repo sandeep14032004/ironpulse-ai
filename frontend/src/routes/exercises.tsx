@@ -5,7 +5,7 @@ import { AppShell } from "@/components/AppShell";
 import { WORKOUT_PLAN, getDayIndex } from "@/lib/workoutPlan";
 
 export const Route = createFileRoute("/exercises")({
-  head: () => ({ meta: [{ title: "Exercises — IronPulse AI" }] }),
+  head: () => ({ meta: [{ title: "Exercises - IronPulse AI" }] }),
   component: Exercises,
 });
 
@@ -24,7 +24,11 @@ function Exercises() {
 
   const filtered = all.filter((e) => {
     const q = query.toLowerCase();
-    const okQ = !q || e.name.toLowerCase().includes(q) || e.dayTitle.toLowerCase().includes(q);
+    const okQ =
+      !q ||
+      e.name.toLowerCase().includes(q) ||
+      e.dayTitle.toLowerCase().includes(q) ||
+      e.description.toLowerCase().includes(q);
     const okM = filter === "All" || e.muscles.includes(filter);
     return okQ && okM;
   });
@@ -39,28 +43,28 @@ function Exercises() {
       <Link
         to="/workout/$day"
         params={{ day: String(today === 7 ? 1 : today) }}
-        className="mt-5 block rounded-2xl gradient-primary text-white p-4 shadow-glow active:scale-[0.99] transition"
+        className="mt-5 block rounded-2xl gradient-primary p-4 text-white shadow-glow transition active:scale-[0.99]"
       >
         <p className="text-xs uppercase tracking-widest opacity-80">Quick start</p>
-        <p className="text-base font-bold mt-0.5">Begin today's workout</p>
+        <p className="mt-0.5 text-base font-bold">Begin today's workout</p>
       </Link>
 
-      <div className="mt-5 relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      <div className="relative mt-5">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search exercises…"
-          className="w-full h-11 pl-9 pr-4 rounded-xl bg-card border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+          placeholder="Search exercises..."
+          className="h-11 w-full rounded-xl border border-border bg-card pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
       </div>
 
-      <div className="mt-3 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 no-scrollbar">
+      <div className="no-scrollbar -mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1">
         {muscles.map((m) => (
           <button
             key={m}
             onClick={() => setFilter(m)}
-            className={`shrink-0 h-8 px-3 rounded-full text-xs font-semibold transition ${
+            className={`h-8 shrink-0 rounded-full px-3 text-xs font-semibold transition ${
               filter === m ? "bg-primary text-primary-foreground shadow-glow" : "bg-secondary text-muted-foreground"
             }`}
           >
@@ -75,21 +79,20 @@ function Exercises() {
             key={i}
             to="/workout/$day"
             params={{ day: String(e.day) }}
-            className="flex items-center gap-3 p-3 rounded-2xl bg-card border border-border active:scale-[0.99]"
+            className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3 active:scale-[0.99]"
           >
-            <div className="h-10 w-10 rounded-xl bg-secondary flex items-center justify-center font-bold text-xs tabular-nums">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary text-xs font-bold tabular-nums">
               D{e.day}
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold truncate">{e.name}</p>
-              <p className="text-xs text-muted-foreground tabular-nums">{e.sets} × {e.reps} · {e.dayTitle}</p>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">{e.name}</p>
+              <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{e.description}</p>
+              <p className="text-xs text-muted-foreground tabular-nums">{e.sets} x {e.reps} · {e.dayTitle}</p>
             </div>
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
           </Link>
         ))}
-        {filtered.length === 0 && (
-          <p className="text-center text-sm text-muted-foreground py-8">No exercises match.</p>
-        )}
+        {filtered.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No exercises match.</p>}
       </div>
     </AppShell>
   );
