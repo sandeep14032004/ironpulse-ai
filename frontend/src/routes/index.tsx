@@ -70,9 +70,11 @@ function Dashboard() {
     ? dashboardQuery.data.data.latestWorkout.completionPercentage / 100
     : localCompletion;
 
-  const tip =
-    motivationQuery.data?.data.message ||
-    useMemo(() => MOTIVATION[Math.floor(Date.now() / 3600_000) % MOTIVATION.length], []);
+  const fallbackTip = useMemo(
+    () => MOTIVATION[Math.floor(Date.now() / 3600_000) % MOTIVATION.length],
+    [],
+  );
+  const tip = motivationQuery.data?.data.message || fallbackTip;
   const profileUser = profileQuery.data;
   const xpValue = dashboardQuery.data?.data.leaderboardReady?.xp ?? profileUser?.xp ?? state.xp;
   const levelProgress = getLevel(xpValue);

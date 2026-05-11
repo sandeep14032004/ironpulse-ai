@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, Check, Flame, Timer, Trophy, ChevronDown, ChevronUp } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -48,6 +48,7 @@ function WorkoutPage() {
   const [saved, setSaved] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [backendSessionId, setBackendSessionId] = useState<string | null>(null);
+  const startRequestedRef = useRef(false);
   const backendEnabled = hasBackendAuth();
   const dayNames = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
 
@@ -85,7 +86,15 @@ function WorkoutPage() {
     mutationFn: async () =>
       apiRequest<{ session: { _id: string } }>("/api/v1/workouts/start", {
         method: "POST",
-        body: JSON.stringify({ day: dayNames[Math.max(0, Math.min(6, dayNum - 1))] || "monday" }),
+        body: JSON.stringify({
+          day: dayNames[Math.max(0, Math.min(6, dayNum - 1))] || "monday",
+          exercises: exercises.map((exercise) => ({
+            name: exercise.name,
+            sets: exercise.sets,
+            reps: exercise.reps,
+            muscleGroup: exercise.muscle ?? baseDay.muscles[0] ?? "",
+          })),
+        }),
       }),
     onSuccess: (res) => setBackendSessionId(res.data.session._id),
     onError: () => setSyncError("Could not start backend session. Local tracking continues."),
@@ -107,6 +116,21 @@ function WorkoutPage() {
     onError: () => setSyncError("Set sync failed. Workout continues locally."),
   });
 
+  const uncompleteSetMutation = useMutation({
+    mutationFn: async (payload: { exerciseName: string; setIndex: number }) => {
+      if (!backendSessionId) return null;
+      return apiRequest("/api/v1/workouts/uncomplete-set", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: backendSessionId,
+          exerciseName: payload.exerciseName,
+          setIndex: payload.setIndex,
+        }),
+      });
+    },
+    onError: () => setSyncError("Undo sync failed. Workout progress may differ until refresh."),
+  });
+
   const finishMutation = useMutation({
     mutationFn: async () => {
       if (!backendSessionId) return null;
@@ -123,7 +147,8 @@ function WorkoutPage() {
   });
 
   useEffect(() => {
-    if (backendEnabled && !backendSessionId && !startMutation.isPending) {
+    if (backendEnabled && !backendSessionId && !startMutation.isPending && !startRequestedRef.current) {
+      startRequestedRef.current = true;
       startMutation.mutate();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -154,17 +179,20 @@ function WorkoutPage() {
 
   const toggleSet = (key: string) => {
     const [exIdx, setIdx] = key.split("-").map(Number);
-    setCompleted((p) => {
-      const next = { ...p, [key]: !p[key] };
-      if (!p[key]) {
-        setShowTimer(true);
-        if (backendEnabled) {
-          const exerciseName = exercises[exIdx]?.name;
-          if (exerciseName) completeSetMutation.mutate({ exerciseName, setIndex: setIdx });
-        }
+    const wasCompleted = !!completed[key];
+    const nextCompleted = { ...completed, [key]: !wasCompleted };
+    setCompleted(nextCompleted);
+
+    if (!wasCompleted) {
+      setShowTimer(true);
+      if (backendEnabled) {
+        const exerciseName = exercises[exIdx]?.name;
+        if (exerciseName) completeSetMutation.mutate({ exerciseName, setIndex: setIdx });
       }
-      return next;
-    });
+    } else if (backendEnabled) {
+      const exerciseName = exercises[exIdx]?.name;
+      if (exerciseName) uncompleteSetMutation.mutate({ exerciseName, setIndex: setIdx });
+    }
   };
 
   const mm = Math.floor(elapsedSec / 60).toString().padStart(2, "0");
@@ -272,7 +300,7 @@ function WorkoutPage() {
                             <button
                               key={key}
                               onClick={() => toggleSet(key)}
-                              disabled={completeSetMutation.isPending}
+                              disabled={completeSetMutation.isPending || uncompleteSetMutation.isPending}
                               className={`flex h-14 items-center justify-center gap-2 rounded-xl border text-sm font-semibold transition active:scale-[0.97] ${
                                 done
                                   ? "border-success bg-success text-success-foreground shadow-soft"

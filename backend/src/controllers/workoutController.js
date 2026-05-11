@@ -12,6 +12,13 @@ const { resolveLevel } = require("../services/levelService");
 const { buildRecoveryScore } = require("../analytics/recovery");
 const { eventBus, EVENTS } = require("../utils/events");
 
+const recalculateSessionProgress = (session) => {
+  const totalSets = session.exercises.reduce((acc, e) => acc + e.totalSets, 0);
+  session.completionPercentage = totalSets
+    ? Math.round((session.completedSets / totalSets) * 100)
+    : 0;
+};
+
 const getTodayWorkout = asyncHandler(async (req, res) => {
   const day = getDayFromDate();
   const { progressedPlan } = await getCurrentProgression(req.user._id, day);
@@ -30,7 +37,15 @@ const getWorkoutByDay = asyncHandler(async (req, res) => {
 
 const startWorkout = asyncHandler(async (req, res) => {
   const day = req.body.day || getDayFromDate();
-  const plan = getPlanByDay(day);
+  const incomingExercises = Array.isArray(req.body.exercises) ? req.body.exercises : [];
+  const plan = incomingExercises.length
+    ? incomingExercises.map((exercise) => ({
+        name: exercise.name,
+        sets: Number(exercise.sets) || 0,
+        reps: String(exercise.reps || ""),
+        muscleGroup: exercise.muscleGroup || exercise.muscle || "",
+      }))
+    : getPlanByDay(day);
   if (!plan.length) throw new AppError("Invalid workout day", 400);
 
   const session = await WorkoutSession.create({
@@ -65,8 +80,7 @@ const completeSet = asyncHandler(async (req, res) => {
     if (exercise.completedSetIndexes.length >= exercise.totalSets) exercise.completed = true;
   }
 
-  const totalSets = session.exercises.reduce((acc, e) => acc + e.totalSets, 0);
-  session.completionPercentage = Math.round((session.completedSets / totalSets) * 100);
+  recalculateSessionProgress(session);
   await session.save();
 
   const user = await User.findById(req.user._id);
@@ -82,6 +96,41 @@ const completeSet = asyncHandler(async (req, res) => {
 
   res.json(buildSuccess({
     message: "Set completed",
+    data: { session, xp: user.xp, level: user.level, progressRing: session.completionPercentage },
+  }));
+});
+
+const uncompleteSet = asyncHandler(async (req, res) => {
+  const { sessionId, exerciseName, setIndex } = req.body;
+  const session = await WorkoutSession.findOne({ _id: sessionId, user: req.user._id, status: "active" });
+  if (!session) throw new AppError("Active session not found", 404);
+
+  const exercise = session.exercises.find((e) => e.exerciseName === exerciseName);
+  if (!exercise) throw new AppError("Exercise not found", 404);
+
+  const existingIndex = exercise.completedSetIndexes.indexOf(setIndex);
+  if (existingIndex !== -1) {
+    exercise.completedSetIndexes.splice(existingIndex, 1);
+    session.completedSets = Math.max(0, session.completedSets - 1);
+    exercise.completed = exercise.completedSetIndexes.length >= exercise.totalSets;
+  }
+
+  recalculateSessionProgress(session);
+  await session.save();
+
+  const user = await User.findById(req.user._id);
+  user.xp = Math.max(0, user.xp - addXpForCompletedSet());
+  user.level = resolveLevel(user.xp);
+  await user.save();
+
+  eventBus.emit(EVENTS.WORKOUT_PROGRESS_UPDATED, {
+    userId: String(req.user._id),
+    sessionId: String(session._id),
+    completionPercentage: session.completionPercentage,
+  });
+
+  res.json(buildSuccess({
+    message: "Set uncompleted",
     data: { session, xp: user.xp, level: user.level, progressRing: session.completionPercentage },
   }));
 });
@@ -130,4 +179,13 @@ const getWorkoutHistory = asyncHandler(async (req, res) => {
   }));
 });
 
-module.exports = { getTodayWorkout, getWeekWorkout, getWorkoutByDay, startWorkout, completeSet, finishWorkout, getWorkoutHistory };
+module.exports = {
+  getTodayWorkout,
+  getWeekWorkout,
+  getWorkoutByDay,
+  startWorkout,
+  completeSet,
+  uncompleteSet,
+  finishWorkout,
+  getWorkoutHistory,
+};

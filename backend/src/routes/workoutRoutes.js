@@ -6,6 +6,7 @@ const {
   getWorkoutByDay,
   startWorkout,
   completeSet,
+  uncompleteSet,
   finishWorkout,
   getWorkoutHistory,
 } = require("../controllers/workoutController");
@@ -19,6 +20,7 @@ router.get("/history", getWorkoutHistory);
 router.get("/:day", getWorkoutByDay);
 router.post("/start", startWorkout);
 router.post("/complete-set", completeSet);
+router.post("/uncomplete-set", uncompleteSet);
 router.post("/finish", finishWorkout);
 
 module.exports = router;

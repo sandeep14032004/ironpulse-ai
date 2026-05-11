@@ -89,6 +89,7 @@ function AuthPage() {
                 value={name}
                 onChange={setName}
                 type="text"
+                autoComplete="name"
               />
             )}
             <Field
@@ -97,6 +98,7 @@ function AuthPage() {
               value={email}
               onChange={setEmail}
               type="email"
+              autoComplete="email"
             />
             <Field
               icon={<Lock className="h-4 w-4" />}
@@ -104,6 +106,7 @@ function AuthPage() {
               value={password}
               onChange={setPassword}
               type="password"
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
             />
 
             {errorText && <p className="text-sm text-destructive">{errorText}</p>}
@@ -134,12 +137,14 @@ function Field({
   value,
   onChange,
   type,
+  autoComplete,
 }: {
   icon: ReactNode;
   placeholder: string;
   value: string;
   onChange: (value: string) => void;
   type: string;
+  autoComplete?: string;
 }) {
   return (
     <label className="flex h-12 items-center gap-3 rounded-2xl border border-border bg-background px-4">
@@ -149,6 +154,7 @@ function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        autoComplete={autoComplete}
         className="w-full bg-transparent text-sm outline-none"
       />
     </label>

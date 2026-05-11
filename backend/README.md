@@ -86,7 +86,18 @@ Error:
    - `NODE_ENV`
    - `FRONTEND_DEV_URL`
    - `FRONTEND_URL`
+   - `FRONTEND_DEV_URL` and `FRONTEND_URL` can each contain multiple comma-separated origins
+     such as `http://localhost:8080,http://127.0.0.1:8080` and your deployed frontend URLs.
 4. Run development server: `npm run dev`
+
+## Frontend/Backend URL Strategy
+
+- Local frontend (`localhost` or `127.0.0.1`) should talk to local backend: `http://localhost:5000`
+- Deployed frontend should talk to deployed backend: `https://ironpulse-ai.onrender.com`
+- The frontend supports:
+  - `VITE_API_BASE_URL` for one fixed backend URL
+  - `VITE_API_BASE_URL_LOCAL` for local development
+  - `VITE_API_BASE_URL_PROD` for deployed usage
 
 ## API Docs
 

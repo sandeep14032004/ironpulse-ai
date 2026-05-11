@@ -11,8 +11,28 @@ export type ApiError = {
   errors?: Array<{ field?: string; message?: string }>;
 };
 
-const API_BASE_URL = "https://ironpulse-ai.onrender.com";
+const DEFAULT_PROD_API_BASE_URL = "https://ironpulse-ai.onrender.com";
+const DEFAULT_LOCAL_API_BASE_URL = "http://localhost:5000";
 const ACCESS_TOKEN_KEY = "ironpulse:accessToken";
+
+const resolveApiBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+  const localEnvUrl = import.meta.env.VITE_API_BASE_URL_LOCAL?.trim();
+  const prodEnvUrl = import.meta.env.VITE_API_BASE_URL_PROD?.trim();
+
+  if (envUrl) return envUrl.replace(/\/+$/, "");
+
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1") {
+      return (localEnvUrl || DEFAULT_LOCAL_API_BASE_URL).replace(/\/+$/, "");
+    }
+  }
+
+  return (prodEnvUrl || DEFAULT_PROD_API_BASE_URL).replace(/\/+$/, "");
+};
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 export const getAccessToken = () =>
   (typeof window !== "undefined" && localStorage.getItem(ACCESS_TOKEN_KEY)) || "";
