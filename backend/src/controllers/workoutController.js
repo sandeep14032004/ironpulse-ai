@@ -25,6 +25,26 @@ const getStartOfToday = () => {
   return start;
 };
 
+const findTrackableSession = async ({ sessionId, userId }) => {
+  if (!sessionId) throw new AppError("Session id is required", 400);
+
+  const session = await WorkoutSession.findOne({ _id: sessionId, user: userId });
+  if (!session) throw new AppError("Workout session not found", 404);
+  if (session.status === "active") return session;
+
+  const canResumePartialToday =
+    session.status === "finished" &&
+    session.completionPercentage < 100 &&
+    session.startedAt >= getStartOfToday();
+
+  if (!canResumePartialToday) throw new AppError("Workout session is no longer active", 409);
+
+  session.status = "active";
+  session.finishedAt = undefined;
+  await session.save();
+  return session;
+};
+
 const getTodayWorkout = asyncHandler(async (req, res) => {
   const day = getDayFromDate();
   const { progressedPlan } = await getCurrentProgression(req.user._id, day);
@@ -99,8 +119,7 @@ const startWorkout = asyncHandler(async (req, res) => {
 
 const completeSet = asyncHandler(async (req, res) => {
   const { sessionId, exerciseName, setIndex, weight = 0 } = req.body;
-  const session = await WorkoutSession.findOne({ _id: sessionId, user: req.user._id, status: "active" });
-  if (!session) throw new AppError("Active session not found", 404);
+  const session = await findTrackableSession({ sessionId, userId: req.user._id });
 
   const exercise = session.exercises.find((e) => e.exerciseName === exerciseName);
   if (!exercise) throw new AppError("Exercise not found", 404);
@@ -136,8 +155,7 @@ const completeSet = asyncHandler(async (req, res) => {
 
 const uncompleteSet = asyncHandler(async (req, res) => {
   const { sessionId, exerciseName, setIndex } = req.body;
-  const session = await WorkoutSession.findOne({ _id: sessionId, user: req.user._id, status: "active" });
-  if (!session) throw new AppError("Active session not found", 404);
+  const session = await findTrackableSession({ sessionId, userId: req.user._id });
 
   const exercise = session.exercises.find((e) => e.exerciseName === exerciseName);
   if (!exercise) throw new AppError("Exercise not found", 404);

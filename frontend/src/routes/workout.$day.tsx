@@ -119,6 +119,7 @@ function WorkoutPage() {
     },
     onError: () => setSyncError("Could not start MongoDB workout session. Please try again."),
   });
+  const canTrackSets = backendEnabled && !!backendSessionId && !startMutation.isPending;
 
   const completeSetMutation = useMutation({
     mutationFn: async (payload: { exerciseName: string; setIndex: number }) => {
@@ -322,7 +323,7 @@ function WorkoutPage() {
                             <button
                               key={key}
                               onClick={() => toggleSet(key)}
-                              disabled={completeSetMutation.isPending || uncompleteSetMutation.isPending}
+                              disabled={!canTrackSets || completeSetMutation.isPending || uncompleteSetMutation.isPending}
                               className={`flex h-14 items-center justify-center gap-2 rounded-xl border text-sm font-semibold transition active:scale-[0.97] ${
                                 done
                                   ? "border-success bg-success text-success-foreground shadow-soft"
