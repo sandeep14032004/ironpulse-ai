@@ -19,6 +19,12 @@ const recalculateSessionProgress = (session) => {
     : 0;
 };
 
+const getStartOfToday = () => {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  return start;
+};
+
 const getTodayWorkout = asyncHandler(async (req, res) => {
   const day = getDayFromDate();
   const { progressedPlan } = await getCurrentProgression(req.user._id, day);
@@ -47,6 +53,32 @@ const startWorkout = asyncHandler(async (req, res) => {
       }))
     : getPlanByDay(day);
   if (!plan.length) throw new AppError("Invalid workout day", 400);
+
+  const existingSession = await WorkoutSession.findOne({
+    user: req.user._id,
+    day,
+    status: "active",
+    startedAt: { $gte: getStartOfToday() },
+  }).sort({ startedAt: -1 });
+
+  if (existingSession) {
+    return res.json(buildSuccess({ message: "Workout resumed", data: { session: existingSession } }));
+  }
+
+  const savedPartialSession = await WorkoutSession.findOne({
+    user: req.user._id,
+    day,
+    status: "finished",
+    completionPercentage: { $lt: 100 },
+    startedAt: { $gte: getStartOfToday() },
+  }).sort({ startedAt: -1 });
+
+  if (savedPartialSession) {
+    savedPartialSession.status = "active";
+    savedPartialSession.finishedAt = undefined;
+    await savedPartialSession.save();
+    return res.json(buildSuccess({ message: "Workout resumed", data: { session: savedPartialSession } }));
+  }
 
   const session = await WorkoutSession.create({
     user: req.user._id,
@@ -144,15 +176,18 @@ const finishWorkout = asyncHandler(async (req, res) => {
   const session = await WorkoutSession.findOne({ _id: sessionId, user: req.user._id, status: "active" });
   if (!session) throw new AppError("Active session not found", 404);
 
-  session.finishedAt = new Date();
-  session.status = "finished";
-  session.duration = Math.max(1, Math.round((session.finishedAt - session.startedAt) / 1000 / 60));
+  const savedAt = new Date();
+  const finishedAllSets = session.completionPercentage >= 100;
+  if (finishedAllSets) {
+    session.finishedAt = savedAt;
+    session.status = "finished";
+  }
+  session.duration = Math.max(1, Math.round((savedAt - session.startedAt) / 1000 / 60));
   session.caloriesBurned = Math.round(session.completedSets * 4.8);
   await session.save();
 
   const user = await User.findById(req.user._id);
   let streak = user.streak;
-  const finishedAllSets = session.completionPercentage >= 100;
   if (finishedAllSets) {
     streak = updateStreakOnWorkout(user, session.finishedAt);
     user.xp += addXpForWorkoutFinish() + addXpForStreakMilestone(streak);
@@ -161,11 +196,13 @@ const finishWorkout = asyncHandler(async (req, res) => {
   await user.save();
 
   const recoveryScore = buildRecoveryScore(session.duration, session.completionPercentage);
-  eventBus.emit(EVENTS.WORKOUT_FINISHED, { userId: String(user._id), sessionId: String(session._id) });
-  if (finishedAllSets) eventBus.emit(EVENTS.STREAK_UPDATED, { userId: String(user._id), streak });
+  if (finishedAllSets) {
+    eventBus.emit(EVENTS.WORKOUT_FINISHED, { userId: String(user._id), sessionId: String(session._id) });
+    eventBus.emit(EVENTS.STREAK_UPDATED, { userId: String(user._id), streak });
+  }
 
   res.json(buildSuccess({
-    message: "Workout finished",
+    message: finishedAllSets ? "Workout finished" : "Workout progress saved",
     data: { session, dashboard: { streak, xp: user.xp, level: user.level, recoveryScore } },
   }));
 });

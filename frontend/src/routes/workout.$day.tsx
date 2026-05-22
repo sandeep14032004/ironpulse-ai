@@ -11,6 +11,16 @@ import { WORKOUT_PLAN, applyProgression } from "@/lib/workoutPlan";
 import { INITIAL_SETTINGS } from "@/lib/storage";
 import { apiRequest, hasBackendAuth } from "@/lib/api";
 
+type WorkoutSessionExercise = {
+  exerciseName: string;
+  completedSetIndexes?: number[];
+};
+
+type WorkoutSessionResponse = {
+  _id: string;
+  exercises?: WorkoutSessionExercise[];
+};
+
 export const Route = createFileRoute("/workout/$day")({
   params: {
     parse: (p) => ({ day: z.string().regex(/^[1-7]$/).parse(p.day) }),
@@ -77,9 +87,21 @@ function WorkoutPage() {
   const calories = Math.round(baseDay.estCalories * progress);
   const allDone = setsDone === totalSets;
 
+  const hydrateCompletedSets = (session: WorkoutSessionResponse) => {
+    const nextCompleted: Record<string, boolean> = {};
+    session.exercises?.forEach((sessionExercise) => {
+      const exerciseIndex = exercises.findIndex((exercise) => exercise.name === sessionExercise.exerciseName);
+      if (exerciseIndex === -1) return;
+      sessionExercise.completedSetIndexes?.forEach((setIndex) => {
+        nextCompleted[`${exerciseIndex}-${setIndex}`] = true;
+      });
+    });
+    setCompleted(nextCompleted);
+  };
+
   const startMutation = useMutation({
     mutationFn: async () =>
-      apiRequest<{ session: { _id: string } }>("/api/v1/workouts/start", {
+      apiRequest<{ session: WorkoutSessionResponse }>("/api/v1/workouts/start", {
         method: "POST",
         body: JSON.stringify({
           day: dayNames[Math.max(0, Math.min(6, dayNum - 1))] || "monday",
@@ -91,7 +113,10 @@ function WorkoutPage() {
           })),
         }),
     }),
-    onSuccess: (res) => setBackendSessionId(res.data.session._id),
+    onSuccess: (res) => {
+      setBackendSessionId(res.data.session._id);
+      hydrateCompletedSets(res.data.session);
+    },
     onError: () => setSyncError("Could not start MongoDB workout session. Please try again."),
   });
 
