@@ -108,13 +108,4 @@ export const apiRequest = async <T>(path: string, init: RequestInit = {}): Promi
   return json as ApiSuccess<T>;
 };
 
-export const isBackendReachable = async () => {
-  try {
-    const res = await withTimeout(`${API_BASE_URL}/health`, { method: "GET" }, 4000);
-    return res.ok;
-  } catch {
-    return false;
-  }
-};
-
 export { API_BASE_URL };

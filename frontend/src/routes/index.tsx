@@ -8,7 +8,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { ProgressRing } from "@/components/ProgressRing";
 import { SyncBanner } from "@/components/SyncBanner";
 import { WORKOUT_PLAN, getDayIndex, getLevel, MOTIVATION } from "@/lib/workoutPlan";
-import { apiRequest, hasBackendAuth, isBackendReachable } from "@/lib/api";
+import { apiRequest, hasBackendAuth } from "@/lib/api";
 import { useAuthProfile } from "@/lib/auth";
 
 export const Route = createFileRoute("/")({
@@ -35,15 +35,10 @@ function Dashboard() {
   const backendEnabled = hasBackendAuth();
 
   const profileQuery = useAuthProfile(backendEnabled);
-  const healthQuery = useQuery({
-    queryKey: ["backend-health"],
-    queryFn: isBackendReachable,
-    refetchInterval: 30_000,
-  });
 
   const dashboardQuery = useQuery({
     queryKey: ["dashboard"],
-    enabled: backendEnabled && healthQuery.data === true,
+    enabled: backendEnabled,
     queryFn: () =>
       apiRequest<{
         user: { xp: number; level: string; streak: number; name: string };
@@ -55,7 +50,7 @@ function Dashboard() {
 
   const motivationQuery = useQuery({
     queryKey: ["motivation"],
-    enabled: backendEnabled && healthQuery.data === true,
+    enabled: backendEnabled,
     queryFn: () => apiRequest<{ message: string; type: string }>("/api/v1/notifications/motivation"),
     staleTime: 60_000,
   });
@@ -87,7 +82,7 @@ function Dashboard() {
         <ThemeToggle />
       </div>
       <SyncBanner
-        online={Boolean(backendEnabled && healthQuery.data)}
+        online={backendEnabled && !dashboardQuery.isError}
         message={
           backendEnabled
             ? dashboardQuery.isError
