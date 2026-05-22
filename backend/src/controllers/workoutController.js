@@ -73,10 +73,12 @@ const completeSet = asyncHandler(async (req, res) => {
   const exercise = session.exercises.find((e) => e.exerciseName === exerciseName);
   if (!exercise) throw new AppError("Exercise not found", 404);
 
+  let completedNewSet = false;
   if (!exercise.completedSetIndexes.includes(setIndex)) {
     exercise.completedSetIndexes.push(setIndex);
     exercise.weight = weight;
     session.completedSets += 1;
+    completedNewSet = true;
     if (exercise.completedSetIndexes.length >= exercise.totalSets) exercise.completed = true;
   }
 
@@ -84,7 +86,7 @@ const completeSet = asyncHandler(async (req, res) => {
   await session.save();
 
   const user = await User.findById(req.user._id);
-  user.xp += addXpForCompletedSet();
+  if (completedNewSet) user.xp += addXpForCompletedSet();
   user.level = resolveLevel(user.xp);
   await user.save();
 
@@ -109,17 +111,19 @@ const uncompleteSet = asyncHandler(async (req, res) => {
   if (!exercise) throw new AppError("Exercise not found", 404);
 
   const existingIndex = exercise.completedSetIndexes.indexOf(setIndex);
+  let removedCompletedSet = false;
   if (existingIndex !== -1) {
     exercise.completedSetIndexes.splice(existingIndex, 1);
     session.completedSets = Math.max(0, session.completedSets - 1);
     exercise.completed = exercise.completedSetIndexes.length >= exercise.totalSets;
+    removedCompletedSet = true;
   }
 
   recalculateSessionProgress(session);
   await session.save();
 
   const user = await User.findById(req.user._id);
-  user.xp = Math.max(0, user.xp - addXpForCompletedSet());
+  if (removedCompletedSet) user.xp = Math.max(0, user.xp - addXpForCompletedSet());
   user.level = resolveLevel(user.xp);
   await user.save();
 
@@ -147,14 +151,18 @@ const finishWorkout = asyncHandler(async (req, res) => {
   await session.save();
 
   const user = await User.findById(req.user._id);
-  const streak = updateStreakOnWorkout(user, session.finishedAt);
-  user.xp += addXpForWorkoutFinish() + addXpForStreakMilestone(streak);
+  let streak = user.streak;
+  const finishedAllSets = session.completionPercentage >= 100;
+  if (finishedAllSets) {
+    streak = updateStreakOnWorkout(user, session.finishedAt);
+    user.xp += addXpForWorkoutFinish() + addXpForStreakMilestone(streak);
+  }
   user.level = resolveLevel(user.xp);
   await user.save();
 
   const recoveryScore = buildRecoveryScore(session.duration, session.completionPercentage);
   eventBus.emit(EVENTS.WORKOUT_FINISHED, { userId: String(user._id), sessionId: String(session._id) });
-  eventBus.emit(EVENTS.STREAK_UPDATED, { userId: String(user._id), streak });
+  if (finishedAllSets) eventBus.emit(EVENTS.STREAK_UPDATED, { userId: String(user._id), streak });
 
   res.json(buildSuccess({
     message: "Workout finished",

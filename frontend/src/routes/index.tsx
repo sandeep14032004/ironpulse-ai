@@ -7,8 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ProgressRing } from "@/components/ProgressRing";
 import { SyncBanner } from "@/components/SyncBanner";
-import { WORKOUT_PLAN, getDayIndex, getLevel, MOTIVATION, getProgressionWeek } from "@/lib/workoutPlan";
-import { useAppState, computeStreak } from "@/lib/storage";
+import { WORKOUT_PLAN, getDayIndex, getLevel, MOTIVATION } from "@/lib/workoutPlan";
 import { apiRequest, hasBackendAuth, isBackendReachable } from "@/lib/api";
 import { useAuthProfile } from "@/lib/auth";
 
@@ -23,7 +22,6 @@ export const Route = createFileRoute("/")({
 });
 
 function Dashboard() {
-  const { state } = useAppState();
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -33,8 +31,7 @@ function Dashboard() {
 
   const dayIdx = getDayIndex(now);
   const today = WORKOUT_PLAN[dayIdx - 1];
-  const localStreak = computeStreak(state.sessions);
-  const week = getProgressionWeek(state.startDate);
+  const week = 1;
   const backendEnabled = hasBackendAuth();
 
   const profileQuery = useAuthProfile(backendEnabled);
@@ -63,12 +60,9 @@ function Dashboard() {
     staleTime: 60_000,
   });
 
-  const todayKey = now.toISOString().slice(0, 10);
-  const todaySession = state.sessions.find((s) => s.date.slice(0, 10) === todayKey && s.day === dayIdx);
-  const localCompletion = todaySession ? todaySession.setsCompleted / Math.max(1, todaySession.totalSets) : 0;
   const completion = dashboardQuery.data?.data.latestWorkout?.completionPercentage
     ? dashboardQuery.data.data.latestWorkout.completionPercentage / 100
-    : localCompletion;
+    : 0;
 
   const fallbackTip = useMemo(
     () => MOTIVATION[Math.floor(Date.now() / 3600_000) % MOTIVATION.length],
@@ -76,10 +70,10 @@ function Dashboard() {
   );
   const tip = motivationQuery.data?.data.message || fallbackTip;
   const profileUser = profileQuery.data;
-  const xpValue = dashboardQuery.data?.data.leaderboardReady?.xp ?? profileUser?.xp ?? state.xp;
+  const xpValue = dashboardQuery.data?.data.leaderboardReady?.xp ?? profileUser?.xp ?? 0;
   const levelProgress = getLevel(xpValue);
   const levelName = dashboardQuery.data?.data.leaderboardReady?.level || profileUser?.level || levelProgress.current.name;
-  const streak = dashboardQuery.data?.data.user?.streak ?? profileUser?.streak ?? localStreak;
+  const streak = dashboardQuery.data?.data.user?.streak ?? profileUser?.streak ?? 0;
   const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening";
   const userName = dashboardQuery.data?.data.user?.name || profileUser?.name;
 
@@ -97,7 +91,7 @@ function Dashboard() {
         message={
           backendEnabled
             ? dashboardQuery.isError
-              ? "Backend unavailable, using cached local data"
+              ? "MongoDB data unavailable right now"
               : undefined
             : "Login to sync your workouts, streak, XP, and analytics to MongoDB."
         }
@@ -155,7 +149,7 @@ function Dashboard() {
               params={{ day: String(dayIdx) }}
               className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-white font-semibold text-foreground shadow-lg transition active:scale-[0.98]"
             >
-              <Play className="h-4 w-4 fill-current" /> {todaySession?.completed ? "Train again" : "Start workout"}
+              <Play className="h-4 w-4 fill-current" /> Start workout
             </Link>
           ) : (
             <div className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-white/15 font-semibold text-white">

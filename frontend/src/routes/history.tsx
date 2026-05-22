@@ -3,7 +3,6 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { SyncBanner } from "@/components/SyncBanner";
-import { computeStreak, useAppState, type WorkoutSession as LocalWorkoutSession } from "@/lib/storage";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
@@ -18,7 +17,6 @@ import {
   Target,
   TrendingDown,
   TrendingUp,
-  Trophy,
 } from "lucide-react";
 import { apiRequest, hasBackendAuth } from "@/lib/api";
 
@@ -78,7 +76,6 @@ export const Route = createFileRoute("/history")({
 });
 
 function HistoryPage() {
-  const { state, addWeight } = useAppState();
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
   const [weight, setWeight] = useState("");
@@ -108,67 +105,49 @@ function HistoryPage() {
         body: JSON.stringify({ weight: value, date: new Date().toISOString() }),
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["bodyweight-history"] }),
-    onError: () => setErrorText("Could not sync bodyweight to backend, saved locally."),
+    onError: () => setErrorText("Could not save bodyweight to MongoDB. Please try again."),
   });
 
   const sessions = useMemo<HistorySession[]>(() => {
     const remoteSessions = workoutHistoryQuery.data?.data.items ?? [];
 
-    if (remoteSessions.length > 0) {
-      return remoteSessions.map((session) => {
-        const exercises = session.exercises ?? [];
-        const totalSets = exercises.reduce((total, exercise) => total + (exercise.totalSets || 0), 0);
-        const setsCompleted =
-          session.completedSets ||
-          exercises.reduce((total, exercise) => total + (exercise.completedSetIndexes?.length || 0), 0);
+    return remoteSessions.map((session) => {
+      const exercises = session.exercises ?? [];
+      const totalSets = exercises.reduce((total, exercise) => total + (exercise.totalSets || 0), 0);
+      const setsCompleted =
+        session.completedSets ||
+        exercises.reduce((total, exercise) => total + (exercise.completedSetIndexes?.length || 0), 0);
 
-        return {
-          id: session._id,
-          title: session.day,
-          date: session.finishedAt || session.startedAt,
-          durationMin: session.duration || 0,
-          setsCompleted,
-          totalSets,
-          calories: session.caloriesBurned || 0,
-          xp: Math.max(25, setsCompleted * 5),
-          completionPercentage:
-            session.completionPercentage || Math.round((setsCompleted / Math.max(1, totalSets)) * 100),
-          exercises: exercises.map((exercise) => ({
-            exerciseName: exercise.exerciseName,
-            totalSets: exercise.totalSets || 0,
-            completedSets: exercise.completedSetIndexes?.length || 0,
-            reps: exercise.reps,
-            weight: exercise.weight,
-            muscleGroup: exercise.muscleGroup,
-          })),
-        };
-      });
-    }
-
-    return [...state.sessions]
-      .reverse()
-      .map((session: LocalWorkoutSession) => ({
-        id: session.id,
-        title: session.title,
-        date: session.date,
-        durationMin: Math.round(session.durationSec / 60),
-        setsCompleted: session.setsCompleted,
-        totalSets: session.totalSets,
-        calories: session.calories,
-        xp: session.xp,
-        completionPercentage: Math.round((session.setsCompleted / Math.max(1, session.totalSets)) * 100),
-        exercises: [],
-      }));
-  }, [state.sessions, workoutHistoryQuery.data]);
+      return {
+        id: session._id,
+        title: session.day,
+        date: session.finishedAt || session.startedAt,
+        durationMin: session.duration || 0,
+        setsCompleted,
+        totalSets,
+        calories: session.caloriesBurned || 0,
+        xp: Math.max(25, setsCompleted * 5),
+        completionPercentage:
+          session.completionPercentage || Math.round((setsCompleted / Math.max(1, totalSets)) * 100),
+        exercises: exercises.map((exercise) => ({
+          exerciseName: exercise.exerciseName,
+          totalSets: exercise.totalSets || 0,
+          completedSets: exercise.completedSetIndexes?.length || 0,
+          reps: exercise.reps,
+          weight: exercise.weight,
+          muscleGroup: exercise.muscleGroup,
+        })),
+      };
+    });
+  }, [workoutHistoryQuery.data]);
 
   const weightEntries = useMemo(() => {
     const remoteWeights = bodyweightQuery.data?.data.entries ?? [];
-    const source = remoteWeights.length > 0 ? remoteWeights : state.weights;
 
-    return [...source]
+    return [...remoteWeights]
       .map((entry) => ({ date: entry.date, weight: entry.weight }))
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [bodyweightQuery.data, state.weights]);
+  }, [bodyweightQuery.data]);
 
   const filteredSessions = useMemo(() => {
     const now = Date.now();
@@ -191,20 +170,13 @@ function HistoryPage() {
         )
       : 0;
     const activeDays = new Set(filteredSessions.map((session) => session.date.slice(0, 10))).size;
-    const streak = computeStreak(
-      filteredSessions.map((session, index) => ({
-        id: session.id || String(index),
-        title: session.title,
-        day: index + 1,
-        date: session.date,
-        durationSec: session.durationMin * 60,
-        setsCompleted: session.setsCompleted,
-        totalSets: session.totalSets,
-        calories: session.calories,
-        xp: session.xp,
-        completed: session.setsCompleted > 0,
-      })),
-    );
+    const completedDays = new Set(filteredSessions.filter((session) => session.setsCompleted > 0).map((session) => session.date.slice(0, 10)));
+    let streak = 0;
+    const cursor = new Date();
+    while (completedDays.has(cursor.toISOString().slice(0, 10))) {
+      streak += 1;
+      cursor.setDate(cursor.getDate() - 1);
+    }
 
     return { totalWorkouts, totalMinutes, totalSets, averageCompletion, activeDays, streak };
   }, [filteredSessions]);
@@ -240,8 +212,12 @@ function HistoryPage() {
     const value = Number.parseFloat(weight);
     if (!Number.isFinite(value) || value <= 0) return;
 
-    addWeight({ date: new Date().toISOString(), weight: value });
-    if (backendEnabled) addWeightMutation.mutate(value);
+    if (backendEnabled) {
+      addWeightMutation.mutate(value);
+    } else {
+      setErrorText("Login to save bodyweight data in MongoDB.");
+      return;
+    }
     setWeight("");
     setErrorText(null);
   };
@@ -273,7 +249,7 @@ function HistoryPage() {
 
       <SyncBanner
         online={backendEnabled}
-        message={errorText || (workoutHistoryQuery.isError ? "Workout history sync failed; showing local history" : undefined)}
+        message={errorText || (workoutHistoryQuery.isError ? "MongoDB workout history unavailable right now" : undefined)}
       />
       {(workoutHistoryQuery.isPending || bodyweightQuery.isPending) && backendEnabled && (
         <p className="mt-2 text-xs text-muted-foreground">Syncing latest gym data...</p>
@@ -430,37 +406,6 @@ function HistoryPage() {
           </div>
         </div>
 
-        {state.prs.length > 0 && (
-          <div className="rounded-[1.75rem] border border-border bg-card p-4 shadow-soft sm:p-5">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent text-accent-foreground">
-                <Trophy className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold">Personal records</p>
-                <p className="text-xs text-muted-foreground">Recent standout lifts</p>
-              </div>
-            </div>
-            <div className="mt-4 space-y-2">
-              {state.prs.slice().reverse().map((pr, index) => (
-                <div key={`${pr.exercise}-${pr.date}-${index}`} className="rounded-2xl bg-background/80 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold">{pr.exercise}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(pr.date).toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" })}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-base font-bold tabular-nums">{pr.value}</p>
-                      <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">{pr.unit}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="mt-6 flex items-center justify-between gap-3">
@@ -566,7 +511,7 @@ function HistoryPage() {
                         </div>
                       ) : (
                         <div className="mt-4 rounded-2xl bg-background/80 p-3 text-sm text-muted-foreground">
-                          Detailed exercise breakdown is available for backend-synced workouts. Local sessions still count toward your totals.
+                          Detailed exercise breakdown is available for MongoDB-synced workouts.
                         </div>
                       )}
                     </div>

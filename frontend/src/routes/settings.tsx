@@ -1,10 +1,10 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Bell, Dumbbell, LogOut, Ruler, Timer, UserRound, Zap } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { useLocalStorage, INITIAL_SETTINGS, type Settings } from "@/lib/storage";
-import { Bell, Dumbbell, LogOut, Ruler, Timer, UserRound, Zap } from "lucide-react";
+import { INITIAL_SETTINGS, type Settings } from "@/lib/storage";
 import { apiRequest, hasBackendAuth } from "@/lib/api";
 import { logoutUser, useAuthProfile } from "@/lib/auth";
 
@@ -18,31 +18,20 @@ function SettingsPage() {
   const queryClient = useQueryClient();
   const backendEnabled = hasBackendAuth();
   const profileQuery = useAuthProfile(backendEnabled);
-  const [localSettings, setLocalSettings] = useLocalStorage<Settings>("ironpulse:settings", INITIAL_SETTINGS);
-  const [remoteDraft, setRemoteDraft] = useState({
-    restSeconds: localSettings.restSeconds,
-    units: localSettings.units,
-    notifications: localSettings.notifications,
-  });
+  const [draft, setDraft] = useState<Settings>(INITIAL_SETTINGS);
 
   useEffect(() => {
     if (!profileQuery.data) return;
-    const syncedLocal: Settings = {
-      ...localSettings,
-      restSeconds: profileQuery.data.timerDuration ?? localSettings.restSeconds,
+    setDraft((current) => ({
+      ...current,
+      restSeconds: profileQuery.data.timerDuration ?? current.restSeconds,
       units: profileQuery.data.preferredUnits === "imperial" ? "lb" : "kg",
-      notifications: profileQuery.data.notificationsEnabled ?? localSettings.notifications,
-    };
-    setLocalSettings(syncedLocal);
-    setRemoteDraft({
-      restSeconds: syncedLocal.restSeconds,
-      units: syncedLocal.units,
-      notifications: syncedLocal.notifications,
-    });
+      notifications: profileQuery.data.notificationsEnabled ?? current.notifications,
+    }));
   }, [profileQuery.data]);
 
   const saveProfileMutation = useMutation({
-    mutationFn: async (next: typeof remoteDraft) =>
+    mutationFn: async (next: Pick<Settings, "restSeconds" | "units" | "notifications">) =>
       apiRequest<{ user: unknown }>("/api/v1/auth/profile", {
         method: "PATCH",
         body: JSON.stringify({
@@ -67,24 +56,19 @@ function SettingsPage() {
     },
   });
 
-  const displayedSettings = backendEnabled ? remoteDraft : localSettings;
   const setSettings = (next: Partial<Settings>) => {
-    if (backendEnabled) {
-      const merged = {
-        restSeconds: next.restSeconds ?? displayedSettings.restSeconds,
-        units: next.units ?? displayedSettings.units,
-        notifications: next.notifications ?? displayedSettings.notifications,
-      };
-      setRemoteDraft(merged);
-      setLocalSettings({ ...localSettings, ...merged });
-      saveProfileMutation.mutate(merged);
-      if (next.liveGymMode !== undefined) {
-        setLocalSettings({ ...localSettings, liveGymMode: next.liveGymMode });
-      }
-      return;
+    const merged = { ...draft, ...next };
+    setDraft(merged);
+    if (
+      backendEnabled &&
+      (next.restSeconds !== undefined || next.units !== undefined || next.notifications !== undefined)
+    ) {
+      saveProfileMutation.mutate({
+        restSeconds: merged.restSeconds,
+        units: merged.units,
+        notifications: merged.notifications,
+      });
     }
-
-    setLocalSettings({ ...localSettings, ...next });
   };
 
   const accountSub = useMemo(() => {
@@ -131,10 +115,10 @@ function SettingsPage() {
         <Row
           icon={<Timer className="h-4 w-4" />}
           title="Rest timer"
-          sub={`${displayedSettings.restSeconds}s default${backendEnabled ? " · synced" : ""}`}
+          sub={`${draft.restSeconds}s default${backendEnabled ? " - synced" : ""}`}
         >
           <select
-            value={displayedSettings.restSeconds}
+            value={draft.restSeconds}
             onChange={(e) => setSettings({ restSeconds: Number(e.target.value) })}
             className="h-9 rounded-lg border border-border bg-secondary px-3 text-sm"
           >
@@ -152,7 +136,7 @@ function SettingsPage() {
                 key={u}
                 onClick={() => setSettings({ units: u })}
                 className={`h-7 rounded-full px-3 text-xs font-semibold ${
-                  displayedSettings.units === u ? "bg-card text-foreground shadow-soft" : "text-muted-foreground"
+                  draft.units === u ? "bg-card text-foreground shadow-soft" : "text-muted-foreground"
                 }`}
               >
                 {u.toUpperCase()}
@@ -160,19 +144,19 @@ function SettingsPage() {
             ))}
           </div>
         </Row>
-        <Row icon={<Dumbbell className="h-4 w-4" />} title="Live Gym Mode" sub="Larger touch targets on this device">
-          <Toggle on={localSettings.liveGymMode} onChange={(v) => setLocalSettings({ ...localSettings, liveGymMode: v })} />
+        <Row icon={<Dumbbell className="h-4 w-4" />} title="Live Gym Mode" sub="Larger touch targets for this view">
+          <Toggle on={draft.liveGymMode} onChange={(v) => setSettings({ liveGymMode: v })} />
         </Row>
       </Section>
 
       <Section title="Notifications">
         <Row icon={<Bell className="h-4 w-4" />} title="Smart reminders" sub={backendEnabled ? "Saved to your account" : "Hydration, recovery & coaching"}>
-          <Toggle on={displayedSettings.notifications} onChange={(v) => setSettings({ notifications: v })} />
+          <Toggle on={draft.notifications} onChange={(v) => setSettings({ notifications: v })} />
         </Row>
       </Section>
 
       <p className="mt-8 text-center text-xs text-muted-foreground">
-        IronPulse AI · v1.0 · {backendEnabled ? "Account sync enabled" : "Guest mode"}
+        IronPulse AI - v1.0 - {backendEnabled ? "Account sync enabled" : "Guest mode"}
       </p>
     </AppShell>
   );

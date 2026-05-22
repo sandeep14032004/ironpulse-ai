@@ -7,8 +7,8 @@ import { z } from "zod";
 import { ProgressRing } from "@/components/ProgressRing";
 import { RestTimer } from "@/components/RestTimer";
 import { SyncBanner } from "@/components/SyncBanner";
-import { WORKOUT_PLAN, applyProgression, getProgressionWeek } from "@/lib/workoutPlan";
-import { useAppState, useLocalStorage, INITIAL_SETTINGS, type Settings, type WorkoutSession } from "@/lib/storage";
+import { WORKOUT_PLAN, applyProgression } from "@/lib/workoutPlan";
+import { INITIAL_SETTINGS } from "@/lib/storage";
 import { apiRequest, hasBackendAuth } from "@/lib/api";
 
 export const Route = createFileRoute("/workout/$day")({
@@ -28,19 +28,15 @@ function WorkoutPage() {
   const dayNum = Number(day);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { state, addSession } = useAppState();
-  const [settings] = useLocalStorage<Settings>("ironpulse:settings", INITIAL_SETTINGS);
-  const week = getProgressionWeek(state.startDate);
+  const settings = INITIAL_SETTINGS;
+  const week = 1;
 
   const baseDay = WORKOUT_PLAN[dayNum - 1];
   if (!baseDay) return null;
 
   const exercises = useMemo(() => baseDay.exercises.map((e) => applyProgression(e, week)), [baseDay, week]);
   const totalSets = exercises.reduce((a, e) => a + e.sets, 0);
-  const [completed, setCompleted] = useLocalStorage<Record<string, boolean>>(
-    `ironpulse:progress:${dayNum}:${new Date().toISOString().slice(0, 10)}`,
-    {},
-  );
+  const [completed, setCompleted] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<number | null>(0);
   const [showTimer, setShowTimer] = useState(false);
   const [startedAt] = useState(() => Date.now());
@@ -79,7 +75,6 @@ function WorkoutPage() {
   const progress = setsDone / totalSets;
   const elapsedSec = Math.floor((now - startedAt) / 1000);
   const calories = Math.round(baseDay.estCalories * progress);
-  const xpEarned = Math.round(progress * 100 + setsDone * 5);
   const allDone = setsDone === totalSets;
 
   const startMutation = useMutation({
@@ -95,9 +90,9 @@ function WorkoutPage() {
             muscleGroup: exercise.muscle ?? baseDay.muscles[0] ?? "",
           })),
         }),
-      }),
+    }),
     onSuccess: (res) => setBackendSessionId(res.data.session._id),
-    onError: () => setSyncError("Could not start backend session. Local tracking continues."),
+    onError: () => setSyncError("Could not start MongoDB workout session. Please try again."),
   });
 
   const completeSetMutation = useMutation({
@@ -113,7 +108,7 @@ function WorkoutPage() {
         }),
       });
     },
-    onError: () => setSyncError("Set sync failed. Workout continues locally."),
+    onError: () => setSyncError("Set could not be saved to MongoDB. Please try again."),
   });
 
   const uncompleteSetMutation = useMutation({
@@ -128,7 +123,7 @@ function WorkoutPage() {
         }),
       });
     },
-    onError: () => setSyncError("Undo sync failed. Workout progress may differ until refresh."),
+    onError: () => setSyncError("Set update could not be saved to MongoDB. Please try again."),
   });
 
   const finishMutation = useMutation({
@@ -139,7 +134,11 @@ function WorkoutPage() {
         body: JSON.stringify({ sessionId: backendSessionId }),
       });
     },
-    onError: () => setSyncError("Workout saved locally; backend sync will retry next session."),
+    onError: () => setSyncError("Workout could not be saved to MongoDB. Please try again."),
+    onSuccess: () => {
+      setSaved(true);
+      setTimeout(() => navigate({ to: "/" }), 800);
+    },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["analytics"] });
@@ -156,28 +155,19 @@ function WorkoutPage() {
 
   const finish = () => {
     if (saved) return navigate({ to: "/" });
-    const session: WorkoutSession = {
-      id: crypto.randomUUID(),
-      day: dayNum,
-      title: baseDay.title,
-      date: new Date().toISOString(),
-      durationSec: elapsedSec,
-      setsCompleted: setsDone,
-      totalSets,
-      calories,
-      xp: xpEarned,
-      completed: allDone,
-    };
     if (backendEnabled && backendSessionId) {
       finishMutation.mutate();
     } else {
-      addSession(session);
+      setSyncError("Login and wait for MongoDB sync before saving workout progress.");
+      return;
     }
-    setSaved(true);
-    setTimeout(() => navigate({ to: "/" }), 800);
   };
 
   const toggleSet = (key: string) => {
+    if (!backendEnabled || !backendSessionId) {
+      setSyncError("Login and wait for MongoDB sync before tracking sets.");
+      return;
+    }
     const [exIdx, setIdx] = key.split("-").map(Number);
     const wasCompleted = !!completed[key];
     const nextCompleted = { ...completed, [key]: !wasCompleted };
@@ -185,11 +175,9 @@ function WorkoutPage() {
 
     if (!wasCompleted) {
       setShowTimer(true);
-      if (backendEnabled) {
-        const exerciseName = exercises[exIdx]?.name;
-        if (exerciseName) completeSetMutation.mutate({ exerciseName, setIndex: setIdx });
-      }
-    } else if (backendEnabled) {
+      const exerciseName = exercises[exIdx]?.name;
+      if (exerciseName) completeSetMutation.mutate({ exerciseName, setIndex: setIdx });
+    } else {
       const exerciseName = exercises[exIdx]?.name;
       if (exerciseName) uncompleteSetMutation.mutate({ exerciseName, setIndex: setIdx });
     }
@@ -221,6 +209,15 @@ function WorkoutPage() {
           </button>
         </div>
         <SyncBanner online={backendEnabled && !!backendSessionId} message={syncError || undefined} />
+        {!backendEnabled && (
+          <Link
+            to="/auth"
+            className="mt-4 flex items-center justify-between rounded-2xl border border-primary/25 bg-card p-4 text-sm font-semibold shadow-soft"
+          >
+            Login to save workout data in MongoDB
+            <ArrowLeft className="h-4 w-4 rotate-180 text-muted-foreground" />
+          </Link>
+        )}
 
         <div className="mt-5 flex items-center gap-5 rounded-3xl border border-border bg-card p-5 shadow-soft">
           <ProgressRing progress={progress} size={104} stroke={10}>
