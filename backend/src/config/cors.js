@@ -7,12 +7,18 @@ const parseOrigins = (...values) =>
     .filter(Boolean);
 
 const allowedOrigins = [...new Set(parseOrigins(process.env.FRONTEND_DEV_URL, process.env.FRONTEND_URL))];
+const allowedPreviewOriginPatterns = [
+  /^https:\/\/ironpulse(?:-ai)?(?:-[a-z0-9]+)*-sandeep-patis-projects\.vercel\.app$/i,
+];
+
+const isAllowedOrigin = (origin) =>
+  allowedOrigins.includes(origin) || allowedPreviewOriginPatterns.some((pattern) => pattern.test(origin));
 
 const corsOptions = {
   origin(origin, callback) {
     const normalizedOrigin = origin?.replace(/\/+$/, "");
 
-    if (!normalizedOrigin || allowedOrigins.includes(normalizedOrigin)) {
+    if (!normalizedOrigin || isAllowedOrigin(normalizedOrigin)) {
       return callback(null, true);
     }
     return callback(new Error("CORS policy blocked this origin"));
